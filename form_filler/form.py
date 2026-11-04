@@ -6,6 +6,7 @@ import html
 import json
 import os
 import re
+import threading
 import time as _time
 import unicodedata
 from dataclasses import dataclass, field
@@ -93,6 +94,28 @@ def match_date_options(options: list[str], d: date) -> list[str]:
     return [opt for opt in options if pat.search(_norm(opt))]
 
 
+def option_date(option: str, ref: date) -> date | None:
+    """Data citada na opção ("03 de novembro"), no ano mais próximo de `ref`."""
+    m = re.search(r"(?<!\d)(\d{1,2}) de (" + "|".join(MESES) + r")\b", _norm(option))
+    if not m:
+        return None
+    day, month = int(m.group(1)), MESES.index(m.group(2)) + 1
+    for year in (ref.year, ref.year + 1, ref.year - 1):
+        try:
+            d = date(year, month, day)
+        except ValueError:
+            return None
+        if abs((d - ref).days) <= 183:
+            return d
+    return None
+
+
+def next_option(options: list[str], after: date) -> tuple[date, str] | None:
+    """A opção com a data mais próxima depois de `after`."""
+    futuras = [(d, o) for o in options if (d := option_date(o, after)) and d > after]
+    return min(futuras, default=None)
+
+
 # índice = date.weekday() (0 = segunda)
 DIAS_SEMANA = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
 
@@ -139,6 +162,32 @@ def fetch_form(client: httpx.Client | None = None) -> Form:
     finally:
         if own:
             client.close()
+
+
+_cache_lock = threading.Lock()
+_cache: dict = {"at": 0.0, "form": None, "error": None}
+CACHE_OK_SECONDS = 300
+CACHE_ERROR_SECONDS = 120
+
+
+def fetch_form_cached() -> Form:
+    """Como fetch_form, mas reaproveita o resultado por alguns minutos (inclusive falhas).
+
+    Usado só para decidir lembretes; o envio sempre baixa o formulário de novo.
+    """
+    with _cache_lock:
+        age = _time.monotonic() - _cache["at"]
+        if _cache["form"] is not None and age < CACHE_OK_SECONDS:
+            return _cache["form"]
+        if _cache["error"] is not None and age < CACHE_ERROR_SECONDS:
+            raise _cache["error"]
+        try:
+            form = fetch_form()
+        except FormError as e:
+            _cache.update(at=_time.monotonic(), form=None, error=e)
+            raise
+        _cache.update(at=_time.monotonic(), form=form, error=None)
+        return form
 
 
 @dataclass

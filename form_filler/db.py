@@ -76,17 +76,26 @@ def delete_user(conn, chat_id: int) -> None:
     conn.commit()
 
 
-def due_users(conn, day: str, weekday: int, hhmm: str, force_weekday: bool = False):
-    """Usuários ativos cujo lembrete já venceu hoje e que ainda não foram perguntados."""
-    rows = conn.execute(
+def due_users(conn, day: str, hhmm: str):
+    """Usuários ativos cujo lembrete já venceu hoje e que ainda não foram tratados hoje.
+
+    Não filtra pelo dia da semana: quem decide se pergunta é o bot, olhando o formulário.
+    """
+    return conn.execute(
         """SELECT u.* FROM users u
            WHERE u.ativo=1 AND u.hora_lembrete <= ?
              AND NOT EXISTS (SELECT 1 FROM asks a WHERE a.chat_id=u.chat_id AND a.data=?)""",
         (hhmm, day),
     ).fetchall()
-    if force_weekday:
-        return rows
-    return [r for r in rows if str(weekday) in r["dias"].split(",")]
+
+
+def mark_skipped(conn, chat_id: int, day: str, motivo: str) -> None:
+    """Registra que hoje não houve pergunta (ex.: 'sem_opcao', 'fora_dos_dias')."""
+    conn.execute(
+        "INSERT OR IGNORE INTO asks (chat_id, data, resposta) VALUES (?, ?, ?)",
+        (chat_id, day, motivo),
+    )
+    conn.commit()
 
 
 def mark_asked(conn, chat_id: int, day: str) -> None:

@@ -20,13 +20,13 @@ Bot do Telegram **não oficial** que preenche o formulário de presença do **Es
 | `/dados` | Mostra os dados cadastrados, o horário, os dias e se os lembretes estão ativos ou pausados. |
 | `/horario HH:MM` | Muda só o horário do lembrete (ex.: `/horario 10:30`). Aceita até 14:30, porque o formulário precisa ser enviado até as 15h. |
 | `/dias` | Mostra botões para marcar ou desmarcar terça e quarta. |
-| `/vou` | Envia o formulário de hoje na hora, sem esperar o lembrete. Só funciona em dia de Espaço Livre (terça ou quarta). Não envia duas vezes no mesmo dia. |
+| `/vou` | Envia o formulário de hoje na hora, sem esperar o lembrete. Funciona em qualquer dia que tenha opção no formulário, inclusive aulas remarcadas. Não envia duas vezes no mesmo dia. |
 | `/pausar` | Para de mandar os lembretes, mas mantém o cadastro. |
 | `/retomar` | Volta a mandar os lembretes. |
 | `/sair` | Apaga o cadastro e o histórico de respostas da pessoa. |
 | `/help` | Lista os comandos. |
 
-**Lembrete:** no horário escolhido, nos dias marcados, o bot pergunta se a pessoa vai, com os botões **✅ Vou** e **❌ Não vou**. "Vou" envia o formulário; se for às 15h ou depois, ele envia mesmo assim e avisa que pode ser que o nome não esteja na portaria. "Não vou" não envia nada.
+**Lembrete:** no horário escolhido, nos dias marcados (veja abaixo o caso de aula remarcada), o bot pergunta se a pessoa vai, com os botões **✅ Vou** e **❌ Não vou**. "Vou" envia o formulário; se for às 15h ou depois, ele envia mesmo assim e avisa que pode ser que o nome não esteja na portaria. "Não vou" não envia nada.
 
 ## Como o bot escolhe a data e confirma o envio
 - **Data:** na hora do envio, o bot baixa o formulário e procura a opção que contém a data de hoje (ex.: "10 de novembro"), ignorando acentos e maiúsculas e aceitando texto extra, como "- Festa de Halloween!".
@@ -34,6 +34,17 @@ Bot do Telegram **não oficial** que preenche o formulário de presença do **Es
 - **Mais de uma opção para hoje** (ex.: "10 de novembro" e "10 de novembro - CANCELADO"): não envia e pergunta ao usuário qual escolher, com botões.
 - **Dia da semana divergente** (ex.: "Terça feira, 11 de novembro", sendo que 11/11 é quarta): envia pela data e avisa da divergência.
 - **Confirmação:** só considera enviado se o Google devolver a página de confirmação. Se o Google recusar, avisa que não enviou. Se a resposta for inesperada ou a conexão cair no meio do envio, avisa que **não sabe** se registrou, não reenvia sozinho e oferece "Reenviar mesmo assim". A última resposta inesperada fica salva em `data/last_unexpected_response.html`.
+
+## Aulas remarcadas
+O formulário é quem diz se há aula no dia. No horário do lembrete, o bot confere se existe uma opção para hoje:
+
+| Situação | O que o bot faz |
+|---|---|
+| Dia marcado (terça/quarta) com opção no formulário | Pergunta normalmente. |
+| Dia marcado **sem** opção no formulário | Não pergunta; avisa que hoje não tem e mostra a próxima data do formulário. |
+| Dia fora da rotina (ex.: quinta) **com** opção no formulário | Pergunta a **todos** os usuários ativos, com o aviso "📅 Data extra ou remarcada". O formulário não diz qual aula foi remarcada, por isso vai para todos. |
+| Terça/quarta que a pessoa não marcou | Não pergunta. |
+| Formulário fora do ar na hora do lembrete | Pergunta nos dias marcados, como antes. |
 
 ## Rodar localmente
 ```bash

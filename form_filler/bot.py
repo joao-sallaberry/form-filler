@@ -19,7 +19,10 @@ from telegram.ext import (
 )
 
 from . import config, db
-from .form import DIAS_SEMANA, AmbiguousDate, FormError, Person, UncertainSubmit, fetch_form, submit
+from .form import (
+    DIAS_SEMANA, AmbiguousDate, FormError, Person, UncertainSubmit, fetch_form, fetch_form_cached,
+    match_date_options, next_option, submit,
+)
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -89,10 +92,6 @@ def dias_label(dias: str) -> str:
 
 def person_from(row) -> Person:
     return Person(row["nome"], row["telefone"], row["email"], row["instagram"], row["unidade"])
-
-
-def is_event_day(row, d: date) -> bool:
-    return config.FORCE_WEEKDAY or str(d.weekday()) in row["dias"].split(",")
 
 
 # ---------- cadastro ----------
@@ -427,31 +426,82 @@ async def cmd_vou(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not (row := await require_user(update)):
         return
     today = now().date()
-    if not config.FORCE_WEEKDAY and today.weekday() not in config.EVENT_WEEKDAYS:
-        await update.message.reply_text("Hoje não tem Espaço Livre (só terça e quarta).")
-        return
+    # vale qualquer dia que tenha opção no formulário (inclusive aulas remarcadas)
     msg = await update.message.reply_text("Enviando o formulário…")
     text, kb = await do_submit(context, row["chat_id"], today)
     await msg.edit_text(text, reply_markup=kb)
 
 
+def plan_reminder(dias: str, weekday: int, has_today: bool | None, force: bool = False) -> str:
+    """Decide o lembrete de um usuário hoje.
+
+    has_today: o formulário tem opção para hoje? (None = não consegui ler o formulário)
+    Retorna 'ask', 'ask_extra' (data fora da rotina), 'notice' (dia marcado sem opção),
+    'skip' ou 'retry' (tentar no próximo minuto).
+    """
+    marcado = force or str(weekday) in dias.split(",")
+    if has_today is None:
+        return "ask" if marcado else "retry"
+    if has_today:
+        if marcado:
+            return "ask"
+        # terça/quarta que a pessoa não marcou: aula normal que ela não quer
+        return "skip" if weekday in config.EVENT_WEEKDAYS else "ask_extra"
+    return "notice" if marcado else "skip"
+
+
+def answer_keyboard(day: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Vou", callback_data=f"vou:{day}"),
+        InlineKeyboardButton("❌ Não vou", callback_data=f"nao:{day}"),
+    ]])
+
+
+def notice_message(today: date, options: list[str]) -> str:
+    msg = f"Hoje ({today:%d/%m}) não tem Espaço Livre no formulário. Pode ter sido remarcado."
+    if nxt := next_option(options, today):
+        msg += f"\nPróxima data no formulário: {nxt[1]}"
+    return msg + "\n\nSe a data de hoje aparecer depois, mande /vou."
+
+
 async def reminder_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
     t = now()
-    day = t.date().isoformat()
-    for row in db.due_users(conn, day, t.weekday(), t.strftime("%H:%M"), config.FORCE_WEEKDAY):
-        db.mark_asked(conn, row["chat_id"], day)  # antes de enviar: evita duplicar
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Vou", callback_data=f"vou:{day}"),
-            InlineKeyboardButton("❌ Não vou", callback_data=f"nao:{day}"),
-        ]])
+    today = t.date()
+    day = today.isoformat()
+    rows = db.due_users(conn, day, t.strftime("%H:%M"))
+    if not rows:
+        return
+    try:
+        form = await asyncio.to_thread(fetch_form_cached)
+        options = form.options(config.ENTRY_DATA)
+        today_opts = match_date_options(options, today)
+        has_today = bool(today_opts)
+    except FormError as e:
+        log.warning("lembrete sem formulário (%s); usando os dias marcados", e)
+        options, today_opts, has_today = [], [], None
+
+    for row in rows:
+        chat_id = row["chat_id"]
+        acao = plan_reminder(row["dias"], today.weekday(), has_today, config.FORCE_WEEKDAY)
+        if acao == "retry":
+            continue
+        if acao == "skip":
+            db.mark_skipped(conn, chat_id, day, "fora_dos_dias")
+            continue
+        nome = row["nome"].split()[0]
+        if acao == "notice":
+            db.mark_skipped(conn, chat_id, day, "sem_opcao")
+            text, kb = notice_message(today, options), None
+        else:
+            db.mark_asked(conn, chat_id, day)  # antes de enviar: evita duplicar
+            text = f"Oi, {nome}! Você vai ao Espaço Livre hoje ({t:%d/%m})?"
+            if acao == "ask_extra":
+                text = "📅 Data extra ou remarcada: " + " / ".join(today_opts) + "\n\n" + text
+            kb = answer_keyboard(day)
         try:
-            await context.bot.send_message(
-                row["chat_id"],
-                f"Oi, {row['nome'].split()[0]}! Você vai ao Espaço Livre hoje ({t:%d/%m})?",
-                reply_markup=kb,
-            )
+            await context.bot.send_message(chat_id, text, reply_markup=kb)
         except Exception:  # noqa: BLE001 (ex.: usuário bloqueou o bot)
-            log.exception("falha ao enviar lembrete para %s", row["chat_id"])
+            log.exception("falha ao enviar lembrete para %s", chat_id)
 
 
 async def setup_bot_profile(app: Application) -> None:

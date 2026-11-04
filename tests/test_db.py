@@ -11,20 +11,22 @@ def test_due_and_idempotent():
     conn = db.connect(":memory:")
     make(conn, 1, "10:00")
     make(conn, 2, "12:00")
-    assert [r["chat_id"] for r in db.due_users(conn, "2026-11-10", 1, "10:00")] == [1]
-    assert db.due_users(conn, "2026-11-10", 2, "10:00") == []  # quarta, não cadastrado
+    assert [r["chat_id"] for r in db.due_users(conn, "2026-11-10", "10:00")] == [1]
     db.mark_asked(conn, 1, "2026-11-10")
-    assert db.due_users(conn, "2026-11-10", 1, "11:00") == []
-    assert [r["chat_id"] for r in db.due_users(conn, "2026-11-10", 1, "13:00")] == [2]
+    assert db.due_users(conn, "2026-11-10", "11:00") == []
+    assert [r["chat_id"] for r in db.due_users(conn, "2026-11-10", "13:00")] == [2]
+    db.mark_skipped(conn, 2, "2026-11-10", "sem_opcao")
+    assert db.due_users(conn, "2026-11-10", "13:00") == []
+    assert db.get_ask(conn, 2, "2026-11-10")["resposta"] == "sem_opcao"
 
 
-def test_paused_and_force():
+def test_paused():
     conn = db.connect(":memory:")
     make(conn)
     db.set_field(conn, 1, "ativo", 0)
-    assert db.due_users(conn, "2026-11-10", 1, "11:00") == []
+    assert db.due_users(conn, "2026-11-10", "11:00") == []
     db.set_field(conn, 1, "ativo", 1)
-    assert len(db.due_users(conn, "2026-11-09", 0, "11:00", force_weekday=True)) == 1
+    assert len(db.due_users(conn, "2026-11-10", "11:00")) == 1
 
 
 def test_record_answer():
@@ -35,17 +37,6 @@ def test_record_answer():
     assert a["resposta"] == "sim" and a["enviado_em"] and a["opcao"] == "X"
     db.delete_user(conn, 1)
     assert db.get_user(conn, 1) is None
-
-
-def test_dias_escolhidos():
-    conn = db.connect(":memory:")
-    make(conn, 1, dias="1")
-    make(conn, 2, dias="2")
-    make(conn, 3, dias="1,2")
-    ids = lambda wd: sorted(r["chat_id"] for r in db.due_users(conn, f"d{wd}", wd, "11:00"))
-    assert ids(1) == [1, 3]  # terça
-    assert ids(2) == [2, 3]  # quarta
-    assert ids(3) == []      # quinta
 
 
 def test_recadastro_atualiza_dias():
