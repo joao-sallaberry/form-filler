@@ -35,13 +35,20 @@ _locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 HELP = (
     "Comandos:\n"
-    "/start ou /editar – cadastro\n"
+    "/cadastro – fazer ou refazer o cadastro\n"
     "/dados – ver seus dados\n"
     "/horario HH:MM – mudar o horário do lembrete\n"
     "/dias – escolher os dias (terça/quarta)\n"
     "/vou – enviar o formulário de hoje agora\n"
     "/pausar e /retomar – parar/voltar os lembretes\n"
-    "/sair – apagar seus dados"
+    "/sair – apagar seus dados\n"
+    "/help – mostrar esta lista"
+)
+
+INTRO = (
+    "Oi! Eu preencho o formulário do Espaço Livre do PD Paulista por você.\n"
+    "Nos dias que você escolher (terça, quarta ou os dois) eu pergunto se você vai; "
+    "se responder ✅ Vou, eu envio o formulário."
 )
 
 
@@ -77,12 +84,17 @@ def is_event_day(row, d: date) -> bool:
 
 # ---------- cadastro ----------
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Primeira mensagem do Telegram: só apresenta o bot."""
+    if db.get_user(conn, update.effective_chat.id):
+        await update.message.reply_text(f"{INTRO}\n\nVocê já tem cadastro.\n\n{HELP}")
+    else:
+        await update.message.reply_text(f"{INTRO}\n\nPara começar, mande /cadastro.")
+
+
+async def cadastro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     await update.message.reply_text(
-        "Oi! Eu preencho o formulário do Espaço Livre do PD Paulista por você.\n"
-        "Nos dias que você escolher (terça, quarta ou os dois) eu pergunto se você vai; "
-        "se responder ✅ Vou, eu envio o formulário.\n\n"
         "Vamos ao cadastro (/cancelar para sair).\nQual o seu *nome completo*?",
         parse_mode="Markdown",
     )
@@ -126,7 +138,7 @@ async def got_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         form = await asyncio.to_thread(fetch_form)
         unidades = form.options(config.ENTRY_UNIDADE)
     except FormError as e:
-        await update.message.reply_text(f"Não consegui ler o formulário agora: {e}\nTente /start mais tarde.")
+        await update.message.reply_text(f"Não consegui ler o formulário agora: {e}\nTente /cadastro mais tarde.")
         return ConversationHandler.END
     context.user_data["unidades"] = unidades
     kb = [[InlineKeyboardButton(u, callback_data=f"u:{i}")] for i, u in enumerate(unidades)]
@@ -211,7 +223,7 @@ async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def require_user(update: Update):
     row = db.get_user(conn, update.effective_chat.id)
     if row is None:
-        await update.effective_message.reply_text("Você ainda não tem cadastro. Use /start.")
+        await update.effective_message.reply_text("Você ainda não tem cadastro. Use /cadastro.")
     return row
 
 
@@ -255,7 +267,7 @@ async def on_dia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     q = update.callback_query
     row = db.get_user(conn, q.message.chat_id)
     if row is None:
-        await q.answer("Sem cadastro. Use /start.")
+        await q.answer("Sem cadastro. Use /cadastro.")
         return
     wd = q.data.split(":")[1]
     sel = {d for d in row["dias"].split(",") if d}
@@ -299,7 +311,7 @@ async def do_submit(context: ContextTypes.DEFAULT_TYPE, chat_id: int, day: date)
             return f"Já enviei hoje ✔ ({ask['opcao']})"
         row = db.get_user(conn, chat_id)
         if row is None:
-            return "Você não tem cadastro. Use /start."
+            return "Você não tem cadastro. Use /cadastro."
         try:
             option = await asyncio.to_thread(submit, person_from(row), day)
         except FormError as e:
@@ -393,7 +405,7 @@ def main() -> None:
 
     text = filters.TEXT & ~filters.COMMAND
     app.add_handler(ConversationHandler(
-        entry_points=[CommandHandler(["start", "editar"], start)],
+        entry_points=[CommandHandler("cadastro", cadastro)],
         states={
             NOME: [MessageHandler(text, got_nome)],
             TELEFONE: [MessageHandler(text, got_telefone)],
@@ -404,8 +416,9 @@ def main() -> None:
             HORA: [MessageHandler(text, got_hora)],
             CONFIRMA: [CallbackQueryHandler(got_confirma, pattern=r"^cad:")],
         },
-        fallbacks=[CommandHandler("cancelar", cancelar), CommandHandler(["start", "editar"], start)],
+        fallbacks=[CommandHandler("cancelar", cancelar), CommandHandler("cadastro", cadastro)],
     ))
+    app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("dados", cmd_dados))
     app.add_handler(CommandHandler("horario", cmd_horario))
     app.add_handler(CommandHandler("dias", cmd_dias))

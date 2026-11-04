@@ -2,13 +2,29 @@
 
 Bot do Telegram que preenche o formulário do **Espaço Livre do PD Paulista**.
 
-- Cada pessoa se cadastra uma vez (`/start`): nome, telefone, e-mail, Instagram, unidade, dias e horário do lembrete.
+- Cada pessoa se cadastra uma vez (`/cadastro`): nome, telefone, e-mail, Instagram, unidade, dias e horário do lembrete.
 - No cadastro a pessoa escolhe receber a pergunta às **terças, às quartas ou nos dois dias** (dá para mudar depois com `/dias`). No horário escolhido, o bot pergunta **Vou / Não vou**.
 - Se a resposta for **Vou**, ele baixa o formulário, acha a opção de data de hoje e envia. Se for **Não vou**, ou se não houver resposta, nada é enviado.
 - Se o formulário não tiver a data de hoje ou mudar de estrutura, o bot avisa o usuário (e o `ADMIN_CHAT_ID`) em vez de enviar errado.
 
 ## Comandos
-`/start` `/editar` `/dados` `/horario HH:MM` `/dias` `/vou` `/pausar` `/retomar` `/sair` `/help`
+
+| Comando | O que faz |
+|---|---|
+| `/start` | Mensagem de boas-vindas, enviada pelo Telegram quando alguém abre o bot pela primeira vez. Explica o bot e indica o `/cadastro`; para quem já tem cadastro, mostra a lista de comandos. |
+| `/cadastro` | Faz o cadastro, passo a passo: nome completo, telefone, e-mail, Instagram (opcional, `/pular`), unidade, dias (terça, quarta ou os dois) e horário do lembrete (até 14:30). No fim mostra um resumo para confirmar ou refazer. Se a pessoa já tem cadastro, os dados são substituídos. |
+| `/cancelar` | Interrompe o cadastro em andamento sem salvar nada. |
+| `/pular` | Durante o cadastro, deixa o Instagram em branco. |
+| `/dados` | Mostra os dados cadastrados, o horário, os dias e se os lembretes estão ativos ou pausados. |
+| `/horario HH:MM` | Muda só o horário do lembrete (ex.: `/horario 10:30`). Aceita até 14:30, porque o formulário precisa ser enviado até as 15h. |
+| `/dias` | Mostra botões para marcar ou desmarcar terça e quarta. |
+| `/vou` | Envia o formulário de hoje na hora, sem esperar o lembrete. Só funciona em dia de Espaço Livre (terça ou quarta). Não envia duas vezes no mesmo dia. |
+| `/pausar` | Para de mandar os lembretes, mas mantém o cadastro. |
+| `/retomar` | Volta a mandar os lembretes. |
+| `/sair` | Apaga o cadastro e o histórico de respostas da pessoa. |
+| `/help` | Lista os comandos. |
+
+**Lembrete:** no horário escolhido, nos dias marcados, o bot pergunta se a pessoa vai, com os botões **✅ Vou** e **❌ Não vou**. "Vou" envia o formulário; se for às 15h ou depois, ele envia mesmo assim e avisa que pode ser que o nome não esteja na portaria. "Não vou" não envia nada.
 
 ## Rodar localmente
 ```bash

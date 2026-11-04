@@ -24,5 +24,5 @@ def test_depois_das_15():
         msg = sent_message(OPT, t)
         assert "fecha às 15h" in msg
         assert "Tentei te adicionar" in msg
-        assert "talvez seu nome não esteja na lista" in msg
+        assert "pode ser que seu nome não esteja na portaria" in msg
         assert OPT in msg

@@ -129,7 +129,7 @@ class Person:
 
 def build_payload(form: Form, person: Person, date_option: str) -> dict[str, str]:
     if person.unidade not in form.options(config.ENTRY_UNIDADE):
-        raise FormError(f"A unidade '{person.unidade}' não existe mais no formulário. Use /editar.")
+        raise FormError(f"A unidade '{person.unidade}' não existe mais no formulário. Use /cadastro.")
     if date_option not in form.options(config.ENTRY_DATA):
         raise FormError("Opção de data inválida.")
     payload = {
