@@ -50,7 +50,8 @@ COMMANDS = [
 HELP = "Comandos:\n" + "\n".join(f"/{c}{a} – {d}" for c, a, d in COMMANDS)
 
 INTRO = (
-    "Oi! Eu preencho o formulário do Espaço Livre do PD Paulista por você.\n"
+    "⚠️ Bot NÃO OFICIAL, sem vínculo com o PD Paulista.\n\n"
+    "Oi! Eu preencho por você o formulário de presença do Espaço Livre do PD Paulista.\n"
     "Nos dias que você escolher (terça, quarta ou os dois) eu pergunto se você vai; "
     "se responder ✅ Vou, eu envio o formulário."
 )
@@ -61,7 +62,7 @@ DESCRIPTION = (
     "O formulário precisa chegar até as 15h do dia."
 )
 # perfil do bot e link compartilhado (até 120 caracteres)
-SHORT_DESCRIPTION = "Preenche por você o formulário do Espaço Livre do PD Paulista nas terças e quartas."
+SHORT_DESCRIPTION = "Bot não oficial que preenche por você o formulário de presença do Espaço Livre do PD Paulista."
 
 
 def now() -> datetime:

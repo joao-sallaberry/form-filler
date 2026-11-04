@@ -1,6 +1,8 @@
 # form-filler
 
-Bot do Telegram que preenche o formulário do **Espaço Livre do PD Paulista**.
+Bot do Telegram **não oficial** que preenche o formulário de presença do **Espaço Livre do PD Paulista**.
+
+> ⚠️ Este projeto não é oficial e não tem vínculo com o PD Paulista nem com o Pé Descalço. Ele só preenche, em nome de cada usuário, o formulário público de presença que qualquer pessoa pode preencher à mão.
 
 - Cada pessoa se cadastra uma vez (`/cadastro`): nome, telefone, e-mail, Instagram, unidade, dias e horário do lembrete.
 - No cadastro a pessoa escolhe receber a pergunta às **terças, às quartas ou nos dois dias** (dá para mudar depois com `/dias`). No horário escolhido, o bot pergunta **Vou / Não vou**.
