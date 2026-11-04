@@ -7,7 +7,7 @@ import re
 from collections import defaultdict
 from datetime import date, datetime
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -33,23 +33,35 @@ DIAS_OPCOES = [("1", "Terça"), ("2", "Quarta"), ("1,2", "Terça e quarta")]
 conn = db.connect()
 _locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-HELP = (
-    "Comandos:\n"
-    "/cadastro – fazer ou refazer o cadastro\n"
-    "/dados – ver seus dados\n"
-    "/horario HH:MM – mudar o horário do lembrete\n"
-    "/dias – escolher os dias (terça/quarta)\n"
-    "/vou – enviar o formulário de hoje agora\n"
-    "/pausar e /retomar – parar/voltar os lembretes\n"
-    "/sair – apagar seus dados\n"
-    "/help – mostrar esta lista"
-)
+# Fonte única dos comandos: alimenta o /help e o menu "/" do Telegram.
+# (comando, argumentos mostrados no /help, descrição)
+COMMANDS = [
+    ("cadastro", "", "fazer ou refazer o cadastro"),
+    ("dados", "", "ver seus dados"),
+    ("horario", " HH:MM", "mudar o horário do lembrete"),
+    ("dias", "", "escolher os dias (terça/quarta)"),
+    ("vou", "", "enviar o formulário de hoje agora"),
+    ("pausar", "", "parar os lembretes"),
+    ("retomar", "", "voltar os lembretes"),
+    ("sair", "", "apagar seus dados"),
+    ("help", "", "mostrar a lista de comandos"),
+]
+
+HELP = "Comandos:\n" + "\n".join(f"/{c}{a} – {d}" for c, a, d in COMMANDS)
 
 INTRO = (
     "Oi! Eu preencho o formulário do Espaço Livre do PD Paulista por você.\n"
     "Nos dias que você escolher (terça, quarta ou os dois) eu pergunto se você vai; "
     "se responder ✅ Vou, eu envio o formulário."
 )
+
+# chat vazio, antes de "Iniciar" (até 512 caracteres)
+DESCRIPTION = (
+    INTRO + "\n\nPara começar, aperte Iniciar e depois mande /cadastro. "
+    "O formulário precisa chegar até as 15h do dia."
+)
+# perfil do bot e link compartilhado (até 120 caracteres)
+SHORT_DESCRIPTION = "Preenche por você o formulário do Espaço Livre do PD Paulista nas terças e quartas."
 
 
 def now() -> datetime:
@@ -398,10 +410,21 @@ async def reminder_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
             log.exception("falha ao enviar lembrete para %s", row["chat_id"])
 
 
+async def setup_bot_profile(app: Application) -> None:
+    """Registra o menu de comandos e as descrições do bot no Telegram."""
+    try:
+        await app.bot.set_my_commands([BotCommand(c, d) for c, _, d in COMMANDS])
+        await app.bot.set_my_description(DESCRIPTION)
+        await app.bot.set_my_short_description(SHORT_DESCRIPTION)
+        log.info("menu de comandos e descrições atualizados")
+    except Exception:  # noqa: BLE001 (não impede o bot de rodar)
+        log.exception("falha ao atualizar menu/descrições do bot")
+
+
 def main() -> None:
     if not config.TELEGRAM_TOKEN:
         raise SystemExit("Defina TELEGRAM_TOKEN no .env")
-    app = Application.builder().token(config.TELEGRAM_TOKEN).build()
+    app = Application.builder().token(config.TELEGRAM_TOKEN).post_init(setup_bot_profile).build()
 
     text = filters.TEXT & ~filters.COMMAND
     app.add_handler(ConversationHandler(

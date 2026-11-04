@@ -26,3 +26,13 @@ def test_depois_das_15():
         assert "Tentei te adicionar" in msg
         assert "pode ser que seu nome não esteja na portaria" in msg
         assert OPT in msg
+
+
+def test_comandos_e_descricoes():
+    from form_filler.bot import COMMANDS, DESCRIPTION, HELP, SHORT_DESCRIPTION
+    for c, _, d in COMMANDS:
+        assert c.islower() and c.isalnum() and 1 <= len(c) <= 32  # regras do Telegram
+        assert 1 <= len(d) <= 256
+        assert f"/{c}" in HELP
+    assert len(DESCRIPTION) <= 512
+    assert len(SHORT_DESCRIPTION) <= 120
