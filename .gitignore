@@ -1,0 +1,14 @@
+.env
+data/
+.venv/
+__pycache__/
+*.db
+
+# Emacs
+*~
+\#*\#
+.\#*
+flycheck_*.el
+*_flymake.*
+.emacs.desktop
+.emacs.desktop.lock

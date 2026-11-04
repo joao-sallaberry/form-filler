@@ -1,0 +1,16 @@
+[Unit]
+Description=form-filler (bot do Telegram do Espaço Livre)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=formfiller
+WorkingDirectory=/opt/form-filler
+EnvironmentFile=/opt/form-filler/.env
+ExecStart=/usr/local/bin/uv run --frozen python -m form_filler.bot
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

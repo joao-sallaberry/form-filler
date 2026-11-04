@@ -1,0 +1,19 @@
+[project]
+name = "form-filler"
+version = "0.1.0"
+description = "Bot do Telegram que preenche o formulário do Espaço Livre do PD Paulista"
+requires-python = ">=3.14"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+dependencies = [
+    "python-telegram-bot[job-queue]>=21.6,<23",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
