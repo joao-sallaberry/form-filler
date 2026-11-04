@@ -166,8 +166,8 @@ async def got_dias(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["dias"] = dias
     await q.edit_message_text(f"Dias: {dias_label(dias)}")
     await q.message.reply_text(
-        "Que horas você quer receber a pergunta? (HH:MM, até "
-        f"{config.LATEST_REMINDER:%H:%M}, porque o formulário precisa ser enviado até as 15h)"
+        "Que horas você quer receber a pergunta? (ex. 09:00). "
+        f"O formulário precisa ser enviado até as {config.DEADLINE:%H}h."
     )
     return HORA
 
