@@ -36,3 +36,9 @@ def test_comandos_e_descricoes():
         assert f"/{c}" in HELP
     assert len(DESCRIPTION) <= 512
     assert len(SHORT_DESCRIPTION) <= 120
+
+
+def test_aviso_dia_da_semana():
+    msg = sent_message("Terça feira, 11 de novembro", datetime(2026, 11, 11, 10, 0, tzinfo=config.TZ), "terça")
+    assert "diz terça, mas hoje é quarta" in msg
+    assert "ℹ️" not in sent_message(OPT, at(10, 0))

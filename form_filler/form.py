@@ -4,6 +4,7 @@
 import argparse
 import html
 import json
+import os
 import re
 import time as _time
 import unicodedata
@@ -85,14 +86,36 @@ def check_entries(form: Form) -> None:
         raise FormError(f"O formulário mudou: campos ausentes {missing}.")
 
 
-def match_date_option(options: list[str], d: date) -> str | None:
-    """Acha a opção que corresponde à data, ex.: 'Terça feira, 03 de novembro ...'."""
+def match_date_options(options: list[str], d: date) -> list[str]:
+    """Todas as opções que correspondem à data, ex.: 'Terça feira, 03 de novembro ...'."""
     mes = MESES[d.month - 1]
     pat = re.compile(rf"(?<!\d)0?{d.day} de {mes}\b")
-    for opt in options:
-        if pat.search(_norm(opt)):
-            return opt
+    return [opt for opt in options if pat.search(_norm(opt))]
+
+
+# índice = date.weekday() (0 = segunda)
+DIAS_SEMANA = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
+
+
+def weekday_mismatch(option: str, d: date) -> str | None:
+    """Se a opção cita um dia da semana diferente do dia da data, retorna o nome citado."""
+    text = _norm(option)
+    for i, nome in enumerate(DIAS_SEMANA):
+        if re.search(rf"\b{_norm(nome)}\b", text) and i != d.weekday():
+            return nome
     return None
+
+
+class AmbiguousDate(FormError):
+    """Mais de uma opção do formulário corresponde à data."""
+
+    def __init__(self, options: list[str]):
+        self.options = options
+        super().__init__("O formulário tem mais de uma opção para hoje.")
+
+
+class UncertainSubmit(FormError):
+    """O Google respondeu, mas sem a página de confirmação: pode ou não ter registrado."""
 
 
 def fetch_form(client: httpx.Client | None = None) -> Form:
@@ -148,46 +171,94 @@ def build_payload(form: Form, person: Person, date_option: str) -> dict[str, str
     return payload
 
 
+# Trechos que só aparecem na página de confirmação do Google Forms.
 CONFIRM_MARKERS = (
+    "usp=form_confirm",  # link "Enviar outra resposta"
     "freebirdFormviewerViewResponseConfirmationMessage",
     "Sua resposta foi registrada",
     "Your response has been recorded",
-    "/viewscore",
 )
 
 
-def is_confirmation(status: int, body: str) -> bool:
-    if status != 200:
-        return False
-    if any(m in body for m in CONFIRM_MARKERS):
-        return True
-    # se voltou a página do form com perguntas, o envio foi rejeitado
-    return "FB_PUBLIC_LOAD_DATA_" not in body
+def submission_status(status: int, body: str) -> str:
+    """'ok' (confirmado), 'rejected' (com certeza não registrou) ou 'uncertain'."""
+    if status == 200 and any(m in body for m in CONFIRM_MARKERS):
+        return "ok"
+    if 400 <= status < 500 or "FB_PUBLIC_LOAD_DATA_" in body:
+        # 4xx ou o form voltou com as perguntas: o Google recusou a resposta
+        return "rejected"
+    return "uncertain"
 
 
-def submit(person: Person, d: date) -> str:
-    """Envia o formulário para a data. Retorna o texto da opção usada."""
+@dataclass
+class SubmitResult:
+    option: str
+    weekday_mismatch: str | None  # dia da semana citado na opção, se diferente do real
+
+
+def choose_option(form: Form, d: date, option: str | None = None) -> str:
+    """Escolhe a opção da data. Com `option`, confere que ela ainda vale para a data."""
+    matches = match_date_options(form.options(config.ENTRY_DATA), d)
+    if option is not None:
+        if option not in matches:
+            raise FormError(f"A opção escolhida não está mais no formulário. Link: {config.VIEW_URL}")
+        return option
+    if not matches:
+        raise FormError(
+            f"O formulário não tem opção para {d.day:02d}/{d.month:02d}. "
+            f"Preencha manualmente se necessário: {config.VIEW_URL}"
+        )
+    if len(matches) > 1:
+        raise AmbiguousDate(matches)
+    return matches[0]
+
+
+def submit(person: Person, d: date, option: str | None = None) -> SubmitResult:
+    """Envia o formulário para a data.
+
+    Sem `option`, escolhe a única opção da data (ou levanta AmbiguousDate).
+    """
     with httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=20, follow_redirects=True) as client:
         form = fetch_form(client)
-        option = match_date_option(form.options(config.ENTRY_DATA), d)
-        if option is None:
-            raise FormError(
-                f"O formulário não tem opção para {d.day:02d}/{d.month:02d}. "
-                f"Preencha manualmente se necessário: {config.VIEW_URL}"
-            )
+        option = choose_option(form, d, option)
         payload = build_payload(form, person, option)
         last: Exception | None = None
         for attempt in range(3):
             try:
                 r = client.post(config.SUBMIT_URL, data=payload)
-            except httpx.HTTPError as e:
+            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+                # a conexão nem abriu: o Google não recebeu nada, pode tentar de novo
                 last = e
                 _time.sleep(2 ** attempt)
                 continue
-            if is_confirmation(r.status_code, r.text):
-                return option
-            raise FormError(f"O Google recusou o envio (HTTP {r.status_code}). Link: {config.VIEW_URL}")
+            except httpx.HTTPError as e:
+                # o pedido pode ter chegado: não repetir para não enviar duas vezes
+                raise UncertainSubmit(
+                    f"A conexão caiu durante o envio ({type(e).__name__}) e não sei se o Google registrou. "
+                    f"Para garantir, preencha manualmente: {config.VIEW_URL}"
+                ) from e
+            match submission_status(r.status_code, r.text):
+                case "ok":
+                    return SubmitResult(option, weekday_mismatch(option, d))
+                case "rejected":
+                    raise FormError(f"O Google recusou o envio (HTTP {r.status_code}). Link: {config.VIEW_URL}")
+                case _:
+                    _save_unexpected(r.text)
+                    raise UncertainSubmit(
+                        f"O Google respondeu (HTTP {r.status_code}), mas sem a página de confirmação, "
+                        f"então não sei se registrou. Para garantir, preencha manualmente: {config.VIEW_URL}"
+                    )
         raise FormError(f"Falha de rede ao enviar: {last}")
+
+
+def _save_unexpected(body: str) -> None:
+    """Guarda a última resposta inesperada do Google, para depurar."""
+    try:
+        path = os.path.join(os.path.dirname(config.DB_PATH) or ".", "last_unexpected_response.html")
+        with open(path, "w") as f:
+            f.write(body)
+    except OSError:
+        pass
 
 
 def _main() -> None:
@@ -197,10 +268,16 @@ def _main() -> None:
     d = date.fromisoformat(args.dry_run)
     form = fetch_form()
     print("Formulário:", form.title)
-    opt = match_date_option(form.options(config.ENTRY_DATA), d)
-    print("Opção de data:", opt)
+    matches = match_date_options(form.options(config.ENTRY_DATA), d)
+    print("Opções de data:", matches or "nenhuma")
+    if len(matches) > 1:
+        print("AVISO: mais de uma opção; o bot perguntaria ao usuário qual escolher.")
+    for m in matches:
+        if wd := weekday_mismatch(m, d):
+            print(f"AVISO: '{m}' diz {wd}, mas {d} é {DIAS_SEMANA[d.weekday()]}.")
     print("Unidades:", form.options(config.ENTRY_UNIDADE))
-    if opt:
+    if matches:
+        opt = matches[0]
         demo = Person("Fulano de Tal", "11999999999", "fulano@example.com", "", form.options(config.ENTRY_UNIDADE)[0])
         print(json.dumps(build_payload(form, demo, opt), ensure_ascii=False, indent=2))
 

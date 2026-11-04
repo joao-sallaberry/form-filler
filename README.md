@@ -28,6 +28,13 @@ Bot do Telegram **não oficial** que preenche o formulário de presença do **Es
 
 **Lembrete:** no horário escolhido, nos dias marcados, o bot pergunta se a pessoa vai, com os botões **✅ Vou** e **❌ Não vou**. "Vou" envia o formulário; se for às 15h ou depois, ele envia mesmo assim e avisa que pode ser que o nome não esteja na portaria. "Não vou" não envia nada.
 
+## Como o bot escolhe a data e confirma o envio
+- **Data:** na hora do envio, o bot baixa o formulário e procura a opção que contém a data de hoje (ex.: "10 de novembro"), ignorando acentos e maiúsculas e aceitando texto extra, como "- Festa de Halloween!".
+- **Nenhuma opção para hoje:** não envia e manda o link para preencher à mão.
+- **Mais de uma opção para hoje** (ex.: "10 de novembro" e "10 de novembro - CANCELADO"): não envia e pergunta ao usuário qual escolher, com botões.
+- **Dia da semana divergente** (ex.: "Terça feira, 11 de novembro", sendo que 11/11 é quarta): envia pela data e avisa da divergência.
+- **Confirmação:** só considera enviado se o Google devolver a página de confirmação. Se o Google recusar, avisa que não enviou. Se a resposta for inesperada ou a conexão cair no meio do envio, avisa que **não sabe** se registrou, não reenvia sozinho e oferece "Reenviar mesmo assim". A última resposta inesperada fica salva em `data/last_unexpected_response.html`.
+
 ## Rodar localmente
 ```bash
 cp .env.example .env      # coloque o TELEGRAM_TOKEN do @BotFather

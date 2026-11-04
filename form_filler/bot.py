@@ -19,7 +19,7 @@ from telegram.ext import (
 )
 
 from . import config, db
-from .form import FormError, Person, fetch_form, submit
+from .form import DIAS_SEMANA, AmbiguousDate, FormError, Person, UncertainSubmit, fetch_form, submit
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -314,41 +314,73 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # ---------- envio ----------
 
-async def do_submit(context: ContextTypes.DEFAULT_TYPE, chat_id: int, day: date) -> str:
-    """Envia o form (idempotente). Retorna a mensagem para o usuário."""
+Reply = tuple[str, InlineKeyboardMarkup | None]
+
+
+async def do_submit(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, day: date,
+    option: str | None = None, force: bool = False,
+) -> Reply:
+    """Envia o form (idempotente). Retorna a mensagem e, se for o caso, botões."""
     answered_at = now()
     async with _locks[chat_id]:
         iso = day.isoformat()
         ask = db.get_ask(conn, chat_id, iso)
         if ask and ask["enviado_em"]:
-            return f"Já enviei hoje ✔ ({ask['opcao']})"
+            return f"Já enviei hoje ✔ ({ask['opcao']})", None
+        if ask and ask["resposta"] == "incerto" and not force:
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("Reenviar mesmo assim", callback_data=f"force:{iso}")]])
+            return (
+                "⚠️ Já tentei enviar hoje, mas não consegui confirmar se o Google registrou. "
+                "Reenviar pode criar uma resposta duplicada.", kb,
+            )
         row = db.get_user(conn, chat_id)
         if row is None:
-            return "Você não tem cadastro. Use /cadastro."
+            return "Você não tem cadastro. Use /cadastro.", None
         try:
-            option = await asyncio.to_thread(submit, person_from(row), day)
+            result = await asyncio.to_thread(submit, person_from(row), day, option)
+        except AmbiguousDate as e:
+            context.chat_data.setdefault("opcoes", {})[iso] = e.options
+            lista = "\n".join(f"{i}. {o}" for i, o in enumerate(e.options, 1))
+            kb = InlineKeyboardMarkup(
+                [[InlineKeyboardButton(str(i), callback_data=f"opt:{iso}:{i - 1}") for i in range(1, len(e.options) + 1)],
+                 [InlineKeyboardButton("❌ Não vou", callback_data=f"nao:{iso}")]]
+            )
+            return f"O formulário tem mais de uma opção para hoje. Qual delas?\n\n{lista}", kb
+        except UncertainSubmit as e:
+            db.record_answer(conn, chat_id, iso, "incerto", erro=str(e))
+            await alert_admin(context, f"Envio incerto de {chat_id}: {e}")
+            return f"⚠️ {e}", None
         except FormError as e:
             db.record_answer(conn, chat_id, iso, "sim", erro=str(e))
             await alert_admin(context, f"Falha no envio de {chat_id}: {e}")
-            return f"❗ Não consegui enviar: {e}"
+            return f"❗ Não consegui enviar: {e}", None
         except Exception as e:  # noqa: BLE001
             log.exception("erro inesperado no envio (chat %s)", chat_id)
             db.record_answer(conn, chat_id, iso, "sim", erro=repr(e))
             await alert_admin(context, f"Erro inesperado no envio de {chat_id}: {e!r}")
-            return f"❗ Erro inesperado. Preencha manualmente: {config.VIEW_URL}"
-        db.record_answer(conn, chat_id, iso, "sim", opcao=option, enviado=True)
+            return f"❗ Erro inesperado. Preencha manualmente: {config.VIEW_URL}", None
+        db.record_answer(conn, chat_id, iso, "sim", opcao=result.option, enviado=True)
         log.info("formulário enviado (chat %s, %s)", chat_id, iso)
-        return sent_message(option, answered_at)
+        return sent_message(result.option, answered_at, result.weekday_mismatch), None
 
 
-def sent_message(option: str, answered_at: datetime) -> str:
+def sent_message(option: str, answered_at: datetime, weekday_mismatch: str | None = None) -> str:
     if answered_at.time() >= config.DEADLINE:
-        return (
+        msg = (
             f"⚠️ A lista da portaria fecha às {config.DEADLINE:%H}h. "
             "Tentei te adicionar mesmo assim, mas pode ser que seu nome não esteja na portaria.\n\n"
             f"Formulário enviado:\n{option}"
         )
-    return f"Formulário enviado ✔\n{option}"
+    else:
+        msg = f"Formulário enviado ✔\n{option}"
+    if weekday_mismatch:
+        hoje = DIAS_SEMANA[answered_at.weekday()]
+        msg += (
+            f"\n\nℹ️ A opção do formulário diz {weekday_mismatch}, mas hoje é {hoje}. "
+            "Enviei pela data; pode ser um erro de digitação no formulário."
+        )
+    return msg
 
 
 async def alert_admin(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
@@ -360,8 +392,9 @@ async def alert_admin(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
 
 
 async def on_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Botões: vou:<data>, nao:<data>, opt:<data>:<i> (escolha de opção), force:<data> (reenviar)."""
     q = update.callback_query
-    action, iso = q.data.split(":", 1)
+    action, iso, *rest = q.data.split(":")
     day = date.fromisoformat(iso)
     chat_id = q.message.chat_id
     if day != now().date():
@@ -376,9 +409,18 @@ async def on_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await q.answer()
         await q.edit_message_text("Beleza, não vou enviar hoje. 👋")
         return
+    option = None
+    if action == "opt":
+        opcoes = context.chat_data.get("opcoes", {}).get(iso) or []
+        i = int(rest[0])
+        if not 0 <= i < len(opcoes):  # o bot reiniciou e perdeu a lista
+            await q.answer("Essa escolha expirou. Mande /vou de novo.")
+            return
+        option = opcoes[i]
     await q.answer("Enviando…")
     await q.edit_message_text("Enviando o formulário…")
-    await q.edit_message_text(await do_submit(context, chat_id, day))
+    text, kb = await do_submit(context, chat_id, day, option=option, force=action == "force")
+    await q.edit_message_text(text, reply_markup=kb)
 
 
 async def cmd_vou(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -389,7 +431,8 @@ async def cmd_vou(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Hoje não tem Espaço Livre (só terça e quarta).")
         return
     msg = await update.message.reply_text("Enviando o formulário…")
-    await msg.edit_text(await do_submit(context, row["chat_id"], today))
+    text, kb = await do_submit(context, row["chat_id"], today)
+    await msg.edit_text(text, reply_markup=kb)
 
 
 async def reminder_tick(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -452,7 +495,7 @@ def main() -> None:
     app.add_handler(CommandHandler("sair", cmd_sair))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CallbackQueryHandler(on_dia, pattern=r"^dia:\d$"))
-    app.add_handler(CallbackQueryHandler(on_answer, pattern=r"^(vou|nao):\d{4}-\d{2}-\d{2}$"))
+    app.add_handler(CallbackQueryHandler(on_answer, pattern=r"^((vou|nao|force):\d{4}-\d{2}-\d{2}|opt:\d{4}-\d{2}-\d{2}:\d+)$"))
 
     app.job_queue.run_repeating(reminder_tick, interval=60, first=5)
     log.info("bot iniciado")
