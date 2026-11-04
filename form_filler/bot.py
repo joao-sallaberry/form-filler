@@ -21,7 +21,7 @@ from telegram.ext import (
 from . import config, db
 from .form import (
     DIAS_SEMANA, AmbiguousDate, FormError, Person, UncertainSubmit, fetch_form, fetch_form_cached,
-    match_date_options, next_option, submit,
+    match_date_options, next_option, option_date, submit,
 )
 
 logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO)
@@ -43,7 +43,7 @@ COMMANDS = [
     ("dados", "", "ver seus dados"),
     ("horario", " HH:MM", "mudar o horário do lembrete"),
     ("dias", "", "escolher os dias (terça/quarta)"),
-    ("vou", "", "enviar o formulário de hoje agora"),
+    ("vou", "", "enviar o formulário (hoje ou outro dia)"),
     ("pausar", "", "parar os lembretes"),
     ("retomar", "", "voltar os lembretes"),
     ("sair", "", "apagar seus dados"),
@@ -325,12 +325,13 @@ async def do_submit(
     async with _locks[chat_id]:
         iso = day.isoformat()
         ask = db.get_ask(conn, chat_id, iso)
+        quando = "hoje" if day == answered_at.date() else f"para {day:%d/%m}"
         if ask and ask["enviado_em"]:
-            return f"Já enviei hoje ✔ ({ask['opcao']})", None
+            return f"Já enviei {quando} ✔ ({ask['opcao']})", None
         if ask and ask["resposta"] == "incerto" and not force:
             kb = InlineKeyboardMarkup([[InlineKeyboardButton("Reenviar mesmo assim", callback_data=f"force:{iso}")]])
             return (
-                "⚠️ Já tentei enviar hoje, mas não consegui confirmar se o Google registrou. "
+                f"⚠️ Já tentei enviar {quando}, mas não consegui confirmar se o Google registrou. "
                 "Reenviar pode criar uma resposta duplicada.", kb,
             )
         row = db.get_user(conn, chat_id)
@@ -361,11 +362,14 @@ async def do_submit(
             return f"❗ Erro inesperado. Preencha manualmente: {config.VIEW_URL}", None
         db.record_answer(conn, chat_id, iso, "sim", opcao=result.option, enviado=True)
         log.info("formulário enviado (chat %s, %s)", chat_id, iso)
-        return sent_message(result.option, answered_at, result.weekday_mismatch), None
+        return sent_message(result.option, answered_at, result.weekday_mismatch, day), None
 
 
-def sent_message(option: str, answered_at: datetime, weekday_mismatch: str | None = None) -> str:
-    if answered_at.time() >= config.DEADLINE:
+def sent_message(
+    option: str, answered_at: datetime, weekday_mismatch: str | None = None, day: date | None = None,
+) -> str:
+    day = day or answered_at.date()
+    if day == answered_at.date() and answered_at.time() >= config.DEADLINE:
         msg = (
             f"⚠️ A lista da portaria fecha às {config.DEADLINE:%H}h. "
             "Tentei te adicionar mesmo assim, mas pode ser que seu nome não esteja na portaria.\n\n"
@@ -374,9 +378,10 @@ def sent_message(option: str, answered_at: datetime, weekday_mismatch: str | Non
     else:
         msg = f"Formulário enviado ✔\n{option}"
     if weekday_mismatch:
-        hoje = DIAS_SEMANA[answered_at.weekday()]
+        real = DIAS_SEMANA[day.weekday()]
+        quando = "hoje" if day == answered_at.date() else f"{day:%d/%m}"
         msg += (
-            f"\n\nℹ️ A opção do formulário diz {weekday_mismatch}, mas hoje é {hoje}. "
+            f"\n\nℹ️ A opção do formulário diz {weekday_mismatch}, mas {quando} é {real}. "
             "Enviei pela data; pode ser um erro de digitação no formulário."
         )
     return msg
@@ -396,7 +401,8 @@ async def on_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     action, iso, *rest = q.data.split(":")
     day = date.fromisoformat(iso)
     chat_id = q.message.chat_id
-    if day != now().date():
+    today = now().date()
+    if (action in ("vou", "nao") and day != today) or day < today:
         await q.answer("Essa pergunta é de outro dia.")
         return
     if action == "nao":
@@ -422,14 +428,76 @@ async def on_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await q.edit_message_text(text, reply_markup=kb)
 
 
+def future_options(options: list[str], today: date) -> list[tuple[date, str]]:
+    """Opções do formulário com data depois de hoje, em ordem."""
+    return sorted((d, o) for o in options if (d := option_date(o, today)) and d > today)
+
+
 async def cmd_vou(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Pergunta se é para hoje ou outro dia; 'outro dia' lista só as datas futuras do formulário."""
     if not (row := await require_user(update)):
         return
     today = now().date()
-    # vale qualquer dia que tenha opção no formulário (inclusive aulas remarcadas)
-    msg = await update.message.reply_text("Enviando o formulário…")
-    text, kb = await do_submit(context, row["chat_id"], today)
-    await msg.edit_text(text, reply_markup=kb)
+    try:
+        form = await asyncio.to_thread(fetch_form_cached)
+    except FormError as e:
+        await update.message.reply_text(f"❗ Não consegui ler o formulário: {e}\nLink: {config.VIEW_URL}")
+        return
+    options = form.options(config.ENTRY_DATA)
+    futuras = future_options(options, today)
+    context.chat_data["futuras"] = [(d.isoformat(), o) for d, o in futuras]
+    if match_date_options(options, today):
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton(f"Hoje ({today:%d/%m})", callback_data="vd:hoje"),
+            InlineKeyboardButton("Outro dia", callback_data="vd:outro"),
+        ]])
+        await update.message.reply_text("Para quando?", reply_markup=kb)
+        return
+    text, kb = future_list(row["chat_id"], context)
+    await update.message.reply_text(f"Hoje ({today:%d/%m}) não tem opção no formulário.\n\n{text}", reply_markup=kb)
+
+
+def future_list(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> Reply:
+    futuras = context.chat_data.get("futuras") or []
+    if not futuras:
+        return "O formulário não tem nenhuma data futura.", None
+    rows = []
+    for i, (iso, opt) in enumerate(futuras):
+        ask = db.get_ask(conn, chat_id, iso)
+        mark = "✔ " if ask and ask["enviado_em"] else ""
+        rows.append([InlineKeyboardButton(f"{mark}{opt}", callback_data=f"fut:{i}")])
+    return "Escolha a data:", InlineKeyboardMarkup(rows)
+
+
+async def on_vou_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Botões do /vou: vd:hoje, vd:outro e fut:<i> (data futura escolhida)."""
+    q = update.callback_query
+    chat_id = q.message.chat_id
+    if q.data == "vd:hoje":
+        await q.answer("Enviando…")
+        await q.edit_message_text("Enviando o formulário…")
+        text, kb = await do_submit(context, chat_id, now().date())
+        await q.edit_message_text(text, reply_markup=kb)
+        return
+    if q.data == "vd:outro":
+        await q.answer()
+        text, kb = future_list(chat_id, context)
+        await q.edit_message_text(text, reply_markup=kb)
+        return
+    futuras = context.chat_data.get("futuras") or []
+    i = int(q.data.split(":")[1])
+    if not 0 <= i < len(futuras):  # o bot reiniciou e perdeu a lista
+        await q.answer("Essa lista expirou. Mande /vou de novo.")
+        return
+    iso, option = futuras[i]
+    day = date.fromisoformat(iso)
+    if day <= now().date():
+        await q.answer("Essa data já passou. Mande /vou de novo.")
+        return
+    await q.answer("Enviando…")
+    await q.edit_message_text("Enviando o formulário…")
+    text, kb = await do_submit(context, chat_id, day, option=option)
+    await q.edit_message_text(text, reply_markup=kb)
 
 
 def plan_reminder(dias: str, weekday: int, has_today: bool | None, force: bool = False) -> str:
@@ -545,6 +613,7 @@ def main() -> None:
     app.add_handler(CommandHandler("sair", cmd_sair))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CallbackQueryHandler(on_dia, pattern=r"^dia:\d$"))
+    app.add_handler(CallbackQueryHandler(on_vou_choice, pattern=r"^(vd:(hoje|outro)|fut:\d+)$"))
     app.add_handler(CallbackQueryHandler(on_answer, pattern=r"^((vou|nao|force):\d{4}-\d{2}-\d{2}|opt:\d{4}-\d{2}-\d{2}:\d+)$"))
 
     app.job_queue.run_repeating(reminder_tick, interval=60, first=5)

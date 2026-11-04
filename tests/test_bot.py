@@ -42,3 +42,9 @@ def test_aviso_dia_da_semana():
     msg = sent_message("Terça feira, 11 de novembro", datetime(2026, 11, 11, 10, 0, tzinfo=config.TZ), "terça")
     assert "diz terça, mas hoje é quarta" in msg
     assert "ℹ️" not in sent_message(OPT, at(10, 0))
+
+
+def test_aviso_dia_da_semana_data_futura():
+    from datetime import date
+    msg = sent_message("Terça feira, 12 de novembro", at(10, 0), "terça", date(2026, 11, 12))
+    assert "diz terça, mas 12/11 é quinta" in msg

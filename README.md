@@ -20,7 +20,7 @@ Bot do Telegram **não oficial** que preenche o formulário de presença do **Es
 | `/dados` | Mostra os dados cadastrados, o horário, os dias e se os lembretes estão ativos ou pausados. |
 | `/horario HH:MM` | Muda só o horário do lembrete (ex.: `/horario 10:30`). Aceita até 14:30, porque o formulário precisa ser enviado até as 15h. |
 | `/dias` | Mostra botões para marcar ou desmarcar terça e quarta. |
-| `/vou` | Envia o formulário de hoje na hora, sem esperar o lembrete. Funciona em qualquer dia que tenha opção no formulário, inclusive aulas remarcadas. Não envia duas vezes no mesmo dia. |
+| `/vou` | Envia o formulário sem esperar o lembrete. Pergunta **Hoje** ou **Outro dia**; "Outro dia" lista só as datas futuras do formulário (as já enviadas aparecem com ✔). Se hoje não tiver opção, vai direto para a lista. Não envia duas vezes para a mesma data, e quem já enviou para uma data futura não é perguntado de novo nesse dia. |
 | `/pausar` | Para de mandar os lembretes, mas mantém o cadastro. |
 | `/retomar` | Volta a mandar os lembretes. |
 | `/sair` | Apaga o cadastro e o histórico de respostas da pessoa. |
