@@ -19,6 +19,7 @@ from telegram.ext import (
 )
 
 from . import config, db
+from .config import dias_label
 from .form import (
     DIAS_SEMANA, AmbiguousDate, FormError, Person, UncertainSubmit, fetch_form, fetch_form_cached,
     match_date_options, next_option, option_date, submit,
@@ -83,11 +84,6 @@ def parse_hhmm(text: str) -> str | None:
     if hhmm > config.LATEST_REMINDER.strftime("%H:%M"):
         return None
     return hhmm
-
-
-def dias_label(dias: str) -> str:
-    nomes = [config.EVENT_WEEKDAYS[int(d)] for d in dias.split(",") if d and int(d) in config.EVENT_WEEKDAYS]
-    return " e ".join(nomes) or "nenhum"
 
 
 def person_from(row) -> Person:

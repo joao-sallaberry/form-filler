@@ -25,6 +25,12 @@ LATEST_REMINDER = time(14, 30)
 # dias com evento (0=segunda ... 6=domingo). Terça e quarta.
 EVENT_WEEKDAYS = {1: "terça", 2: "quarta"}
 
+
+def dias_label(dias: str) -> str:
+    """'1,2' -> 'terça e quarta' (valor da coluna users.dias)."""
+    nomes = [EVENT_WEEKDAYS[int(d)] for d in dias.split(",") if d and int(d) in EVENT_WEEKDAYS]
+    return " e ".join(nomes) or "nenhum"
+
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 DB_PATH = os.environ.get("DB_PATH", "data/form-filler.db")
 ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"]) if os.environ.get("ADMIN_CHAT_ID") else None

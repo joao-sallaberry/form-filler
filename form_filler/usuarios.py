@@ -4,7 +4,7 @@
 Uso: uv run python -m form_filler.usuarios
 """
 from . import db
-from .bot import dias_label
+from .config import dias_label  # não importar .bot: carregar o telegram leva ~7s no Pi
 
 COLUNAS = [
     ("chat_id", "chat_id"),
