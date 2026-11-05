@@ -68,6 +68,14 @@ journalctl -u form-filler -f
 ```
 Ajuste o caminho do `uv` no `.service` (`which uv`).
 
+## Listar usuários
+No servidor, na pasta do projeto:
+```bash
+uv run python -m form_filler.usuarios                                          # local
+sudo -u formfiller bash -c 'cd /opt/form-filler && uv run python -m form_filler.usuarios'   # VPS
+```
+Mostra uma tabela com os dados de cada usuário, os dias, o horário e se está ativo ou pausado. Usa o `DB_PATH` do `.env`.
+
 ## Privacidade
 O banco SQLite (`data/form-filler.db`, permissão 600) guarda os dados pessoais dos usuários. `/sair` apaga tudo do usuário.
 
