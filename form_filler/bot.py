@@ -141,7 +141,7 @@ async def got_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def got_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
-    context.user_data["instagram"] = "" if text == "/pular" else text
+    context.user_data["instagram"] = "" if text == "/pular" else text.lower()
     try:
         form = await asyncio.to_thread(fetch_form)
         unidades = form.options(config.ENTRY_UNIDADE)

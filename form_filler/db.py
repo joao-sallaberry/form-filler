@@ -39,6 +39,9 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    # handles do Instagram não diferenciam maiúsculas: guardamos sempre em minúsculas
+    conn.execute("UPDATE users SET instagram=lower(instagram) WHERE instagram<>lower(instagram)")
+    conn.commit()
     if path != ":memory:" and new:
         os.chmod(path, 0o600)
     return conn
@@ -49,6 +52,7 @@ def now_iso() -> str:
 
 
 def upsert_user(conn, chat_id: int, **f) -> None:
+    f["instagram"] = f["instagram"].lower()
     conn.execute(
         """INSERT INTO users (chat_id, nome, telefone, email, instagram, unidade, hora_lembrete, dias, ativo, criado_em)
            VALUES (:chat_id, :nome, :telefone, :email, :instagram, :unidade, :hora_lembrete, :dias, 1, :criado_em)
