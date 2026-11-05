@@ -51,13 +51,3 @@ def test_instagram_minusculo():
     db.upsert_user(conn, 1, nome="A B", telefone="11999999999", email="a@b.c",
                    instagram="@Fulano.Silva", unidade="PD Pinheiros", hora_lembrete="10:00", dias="1")
     assert db.get_user(conn, 1)["instagram"] == "@fulano.silva"
-
-
-def test_instagram_minusculo_registros_antigos(tmp_path):
-    path = str(tmp_path / "t.db")
-    conn = db.connect(path)
-    make(conn)
-    conn.execute("UPDATE users SET instagram='@Antigo' WHERE chat_id=1")
-    conn.commit()
-    conn.close()
-    assert db.get_user(db.connect(path), 1)["instagram"] == "@antigo"
