@@ -7,10 +7,9 @@ Wants=network-online.target
 Type=simple
 User=formfiller
 WorkingDirectory=/opt/form-filler
-EnvironmentFile=/opt/form-filler/.env
-ExecStart=/usr/local/bin/uv run --frozen python -m form_filler.bot
+ExecStart=/opt/form-filler/.venv/bin/python -m form_filler.bot
 Restart=always
-RestartSec=10
+RestartSec=30
 
 [Install]
 WantedBy=multi-user.target

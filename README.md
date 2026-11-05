@@ -56,23 +56,33 @@ uv run python -m form_filler.bot
 ```
 Para testar o lembrete fora de terça: `FORCE_WEEKDAY=1` no `.env` (não use em produção).
 
-## Deploy na VPS (systemd)
+## Deploy no Raspberry Pi (systemd)
+O bot roda no Pi com um usuário próprio, `formfiller`, em `/opt/form-filler`. Assim ele não tem acesso aos arquivos do seu usuário.
+
+Instalação (uma vez; precisa do `uv` em `/usr/local/bin`):
 ```bash
-sudo useradd -r -m -d /opt/form-filler formfiller
-sudo rsync -a --exclude .venv --exclude data ./ /opt/form-filler/
+sudo useradd -r -d /opt/form-filler -s /usr/sbin/nologin formfiller
+sudo git clone https://github.com/joao-sallaberry/form-filler.git /opt/form-filler
 sudo chown -R formfiller: /opt/form-filler
-sudo -u formfiller bash -c 'cd /opt/form-filler && uv sync --frozen'
+cd /opt/form-filler
+sudo -u formfiller cp .env.example .env && sudo chmod 600 .env   # coloque o TELEGRAM_TOKEN e o ADMIN_CHAT_ID
+sudo -u formfiller env UV_CACHE_DIR=/tmp/uv-formfiller uv sync --frozen --no-dev
 sudo cp deploy/form-filler.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now form-filler
 journalctl -u form-filler -f
 ```
-Ajuste o caminho do `uv` no `.service` (`which uv`).
+
+Atualizar:
+```bash
+cd /opt/form-filler && sudo -u formfiller git pull --ff-only
+sudo -u formfiller env UV_CACHE_DIR=/tmp/uv-formfiller uv sync --frozen --no-dev
+sudo systemctl restart form-filler   # só se o código do bot mudou
+```
 
 ## Listar usuários
-No servidor, na pasta do projeto:
 ```bash
-uv run python -m form_filler.usuarios                                          # local
-sudo -u formfiller bash -c 'cd /opt/form-filler && uv run python -m form_filler.usuarios'   # VPS
+uv run python -m form_filler.usuarios                                     # local
+cd /opt/form-filler && sudo -u formfiller .venv/bin/python -m form_filler.usuarios   # no Raspberry Pi
 ```
 Mostra uma tabela com os dados de cada usuário, os dias, o horário e se está ativo ou pausado. Usa o `DB_PATH` do `.env`.
 
